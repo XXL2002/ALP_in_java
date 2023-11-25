@@ -1,4 +1,5 @@
 public class ALPDecompression {
+    private ALPrdDecompression ALPrdDe = new ALPrdDecompression();
     private static final double[] FRAC_ARR = {
             1.0,
             0.1,
@@ -62,8 +63,6 @@ public class ALPDecompression {
          */
     }
     public double[] decompress() {
-
-        deserialize();
         output = new double[count];
 
         long factor = ALPConstants.U_FACT_ARR[vectorFactor];
@@ -86,5 +85,20 @@ public class ALPDecompression {
         }
 
         return output;
+    }
+
+    public double[] entry(){
+        boolean useALP = true;
+        /*
+        TODO: read 1 bit - >useALP
+         */
+        if (useALP){
+            deserialize();
+            return decompress();
+        }else{
+            ALPrdDe.deserialize();
+            return ALPrdDe.decompress();
+        }
+
     }
 }

@@ -321,6 +321,7 @@ public class ALPCompression {
 
         /*
          TODO: bit pack
+            useALP=1            使用ALP压缩         bit
             ALPCombination      最佳<e,f>组合       byte + byte
             bitWidth            FOR单值所需位宽      short
             frameOfReference    FOR基准值           long

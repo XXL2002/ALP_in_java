@@ -117,6 +117,7 @@ public class ALPrdCompression {
 
         /*
         TODO: bit pack
+            useALP=0            不使用ALP压缩   bit
             nValues             向量长度        int
             rightBw             右值位宽        byte
             leftParts           左值部分        bits<ALPrdConstants.DICTIONARY_BW>[nValues]
