@@ -1,3 +1,5 @@
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.Map;
@@ -48,8 +50,9 @@ public class ALPrdCompression {
             for (int i = dictIdx; i < leftPartsSortedRepetitions.size(); i++) {
                 state.leftPartsDictMap.put(leftPartsSortedRepetitions.get(i).getValue().shortValue(), (short) i);
             }
-            state.leftBw = ALPrdConstants.DICTIONARY_BW;
+            state.leftBw = leftBw;
             state.rightBw = rightBw;
+            state.exceptionsCount = (short) exceptionsCount;
 
 //            assert state.leftBw > 0 && state.leftBw <= AlpRDConstants.CUTTING_LIMIT && state.rightBw > 0;
         }
@@ -91,6 +94,7 @@ public class ALPrdCompression {
         }
 
         // Dictionary encoding for left parts
+        short exceptionsCount = 0;
         for (int i = 0; i < nValues; i++) {
             short dictionaryIndex;
             short dictionaryKey = leftParts[i];
@@ -104,22 +108,51 @@ public class ALPrdCompression {
 
             // Left parts not found in the dictionary are stored as exceptions
             if (dictionaryIndex >= ALPrdConstants.DICTIONARY_SIZE) {
-                state.exceptions[state.exceptionsCount] = dictionaryKey;
-                state.exceptionsPositions[state.exceptionsCount] = (short) i;
-                state.exceptionsCount++;
+                leftParts[i] = 0;   // 用0替换
+                state.exceptions[exceptionsCount] = dictionaryKey;
+                state.exceptionsPositions[exceptionsCount] = (short) i;
+                exceptionsCount++;
             }
         }
 
-//        int rightBpSize = BitpackingPrimitives.getRequiredSize(nValues, state.rightBw);
-//        int leftBpSize = BitpackingPrimitives.getRequiredSize(nValues, state.leftBw);
+        /*
+        TODO: bit pack
+            nValues             向量长度        int
+            rightBw             右值位宽        byte
+            leftParts           左值部分        bits<ALPrdConstants.DICTIONARY_BW>[nValues]
+            rightParts          右值部分        bits<rightBw>[nValues]
+            leftPartsDict       左值字典        bits<leftBw>[ALPrdConstants.DICTIONARY_SIZE]
+            exceptionsCount     异常值数量      short
+            exceptions          异常值原值      bits<leftBw>[exceptionsCount]
+            exceptionsPositions 异常值位置      short[exceptionsCount]
+         */
 
-//        // Bitpacking Left and Right parts
-//        if (!EMPTY) {
-//            BitpackingPrimitives.packBuffer(state.leftPartsEncoded, leftParts, nValues, state.leftBw);
-//            BitpackingPrimitives.packBuffer(state.rightPartsEncoded, rightParts, nValues, state.rightBw);
-//        }
-//
-//        state.leftBpSize = leftBpSize;
-//        state.rightBpSize = rightBpSize;
+        // 以下为模拟调用ALPrdDecompression,仅供测试使用
+        ALPrdDecompression ALPrdDe = new ALPrdDecompression(leftParts,rightParts, state.leftPartsDict,nValues, state.exceptionsCount, state.exceptions, state.exceptionsPositions, state.rightBw);
+        double[] out = ALPrdDe.decompress();
+
+        String csvFile = "D:\\Code\\ALP\\src\\main\\java\\RDout.csv"; // 输出文件名
+
+        try (FileWriter writer = new FileWriter(csvFile,true)) {
+            for (double value : out) {
+                writer.append(String.valueOf(value)).append("\n"); // 写入每个值并在行尾添加换行符
+            }
+            System.out.println("CSV file was written successfully.");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * ALPrd 算法入口
+     * @param row 单行数据
+     */
+    public void entry(Vector<Double> row){
+        Vector<Long> rowLong = new Vector<>();
+        for (double db:row){
+            rowLong.add(Double.doubleToLongBits(db));
+        }
+        findBestDictionary(rowLong,state);
+        compress(rowLong,rowLong.size(),state);
     }
 }

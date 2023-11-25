@@ -1,11 +1,15 @@
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.*;
 
 public class ALPCompression {
     static ALPCompressionState state = new ALPCompressionState();
+    ALPrdCompression ALPrd = new ALPrdCompression();
     static final double MAGIC_NUMBER = Math.pow(2,51) + Math.pow(2,52); // 对应文章中的sweet值，用于消除小数部分
     static final byte MAX_EXPONENT = 18;
     static final byte EXACT_TYPE_BITSIZE = Double.SIZE;
-//    private static final short EXCEPTION_POSITION_SIZE = Short.SIZE;    // ALP用16位整数记录异常值的下标
     private static final double[] EXP_ARR = {
             1.0,
             10.0,
@@ -56,6 +60,19 @@ public class ALPCompression {
             0.00000000000000000001
     };
 
+    private static int getWidthNeeded(long number) {
+        if (number == 0) {
+            return 0;
+        }
+        int bitCount = 0;
+        while (number > 0) {
+            bitCount++;
+            number = number >>> 1; // 右移一位
+        }
+        return bitCount;
+    }
+
+
 
     /**
      * 用于将double转为long，来自文章中的fast rounding部分
@@ -65,13 +82,10 @@ public class ALPCompression {
     static long doubleToLong (double db) {
 
         double n = db + MAGIC_NUMBER - MAGIC_NUMBER;
-////        暂不考虑 Special values which cannot be casted to int64 without an undefined behaviour
-//        if (!Double.isFinite(num) || Double.isNaN(num) || num > ENCODING_UPPER_LIMIT || num < ENCODING_LOWER_LIMIT) {
-//            return (long) ENCODING_UPPER_LIMIT;
-//        }
         return (long) n;
     }
 
+    // 第一级采样
     static void findTopKCombinations(Vector<Vector<Double>> vectorsSampled){
         state.bestKCombinations.clear();
         Map<Map.Entry<Byte, Byte>, Integer> bestKCombinationsHash = new HashMap<>();    // 记录每个组合出现的次数
@@ -94,9 +108,6 @@ public class ALPCompression {
                     long minEncodedValue = Long.MAX_VALUE;
 
                     for (Double db : sampledVector) {
-                        //                        Double decoded_value;
-//                        Double tmp_encoded_value;
-//                        Long encoded_value;
                         double tmp_encoded_value = db * EXP_ARR[expIdx] * FRAC_ARR[factorIdx];
                         long encoded_value = doubleToLong(tmp_encoded_value);    // 对应ALPenc
 
@@ -111,12 +122,13 @@ public class ALPCompression {
                         }
                     }
                     // Skip combinations which yields to almost all exceptions
-                    if (nonExceptionsCnt < 2) {
+                     // Also skip combinations which yields integers bigger than 2^48
+                    if (nonExceptionsCnt < sampledVector.size()*0.5 || maxEncodedValue >= 1L<<48) {
                         continue;
                     }
                     // Evaluate factor/exponent compression size (we optimize for FOR)
                     long delta = maxEncodedValue - minEncodedValue;
-                    estimatedBitsPerValue = (int) Math.ceil( Math.log(delta + 1) / Math.log(2) );
+                    estimatedBitsPerValue = (int) Math.ceil( Math.log(delta + 1) / Math.log(2) );   // FOR单值位宽
                     estimatedCompressionSize += (long) nSamples * estimatedBitsPerValue;    // 正常编码的部分
                     estimatedCompressionSize += (long) exceptionsCnt * (EXACT_TYPE_BITSIZE + ALPConstants.EXCEPTION_POSITION_SIZE);   // 异常值部分
 
@@ -133,9 +145,11 @@ public class ALPCompression {
                 }
             }
             // 更新行组中的最佳组合
-            Map.Entry<Byte, Byte> bestCombination = new AbstractMap.SimpleEntry<>(bestExponent, bestFactor);
-            int cnt = bestKCombinationsHash.getOrDefault(bestCombination,0);
-            bestKCombinationsHash.put(bestCombination, cnt + 1);
+            if (bestTotalBits!=(long) nSamples * (EXACT_TYPE_BITSIZE + ALPConstants.EXCEPTION_POSITION_SIZE) + (long) nSamples * EXACT_TYPE_BITSIZE) {
+                Map.Entry<Byte, Byte> bestCombination = new AbstractMap.SimpleEntry<>(bestExponent, bestFactor);
+                int cnt = bestKCombinationsHash.getOrDefault(bestCombination, 0);
+                bestKCombinationsHash.put(bestCombination, cnt + 1);
+            }
         }
 
         // Convert our hash pairs to a Combination vector to be able to sort
@@ -160,8 +174,12 @@ public class ALPCompression {
         for (int i = 0; i < Math.min(ALPConstants.MAX_COMBINATIONS, (byte)bestKCombinations.size()); i++) {
             state.bestKCombinations.add(bestKCombinations.get(i));
         }
+
+        // 判断是否使用ALPrd
+        state.useALP = !bestKCombinations.isEmpty();
     }
 
+    // 第二级采样
     public static  void findBestFactorAndExponent(Vector<Double> inputVector, int nValues, ALPCompressionState state) {
         // We sample equidistant values within a vector; to do this we skip a fixed number of values
         Vector<Double> vectorSample = new Vector<>();
@@ -178,16 +196,14 @@ public class ALPCompression {
 
         // We try each K combination in search for the one which minimize the compression size in the vector
         for (int combinationIdx = 0; combinationIdx < state.bestKCombinations.size(); combinationIdx++) {
-            int exponentIdx = state.bestKCombinations.get(combinationIdx).e;
-            int factorIdx = state.bestKCombinations.get(combinationIdx).f;
+            byte exponentIdx = state.bestKCombinations.get(combinationIdx).e;
+            byte factorIdx = state.bestKCombinations.get(combinationIdx).f;
             int exceptionsCount = 0;
             long estimatedCompressionSize = 0;
             long maxEncodedValue = Long.MIN_VALUE;
             long minEncodedValue = Long.MAX_VALUE;
 
-            for (int sampleIdx = 0; sampleIdx < nSamples; ++sampleIdx) {
-                double db = vectorSample.get(sampleIdx);
-
+            for (double db : vectorSample) {
                 double tmpEncodedValue = db * EXP_ARR[exponentIdx] * FRAC_ARR[factorIdx];
                 long encodedValue = (long) tmpEncodedValue;
 
@@ -195,7 +211,7 @@ public class ALPCompression {
                 if (decodedValue == db) {
                     maxEncodedValue = Math.max(encodedValue, maxEncodedValue);
                     minEncodedValue = Math.min(encodedValue, minEncodedValue);
-                }else {
+                } else {
                     exceptionsCount++;
                 }
             }
@@ -207,8 +223,8 @@ public class ALPCompression {
 
             if (combinationIdx == 0) {
                 bestTotalBits = estimatedCompressionSize;
-                bestFactor = (byte) factorIdx;
-                bestExponent = (byte) exponentIdx;
+                bestFactor = factorIdx;
+                bestExponent = exponentIdx;
                 continue;
             }
 
@@ -222,8 +238,8 @@ public class ALPCompression {
             }
 
             bestTotalBits = estimatedCompressionSize;
-            bestFactor = (byte) factorIdx;
-            bestExponent = (byte) exponentIdx;
+            bestFactor = factorIdx;
+            bestExponent = exponentIdx;
             worseTotalBitsCounter = 0;
         }
         state.vectorExponent = bestExponent;
@@ -249,18 +265,18 @@ public class ALPCompression {
             state.encodedIntegers[i] = encodedValue;
 
             double decodedValue = encodedValue * ALPConstants.FACT_ARR[state.vectorFactor] * FRAC_ARR[state.vectorExponent];
-            tmpDecodedValues.set(i, decodedValue);
+            tmpDecodedValues.add(decodedValue);
         }
 
         // Detecting exceptions with predicated comparison
         int exceptionsIdx = 0;
-        Vector<Long> exceptionsPositions = new Vector<>(nValues);
+        Vector<Short> exceptionsPositions = new Vector<>(nValues);
         for (int i = 0; i < nValues; i++) {
             double decodedValue = tmpDecodedValues.get(i);
             double actualValue = inputVector.get(i);
             boolean isException = (decodedValue != actualValue);
-            exceptionsPositions.set(exceptionsIdx, (long) i);
-            exceptionsIdx += isException?1:0;
+            if (isException)
+                exceptionsPositions.add((short) i);
         }
 
         // Finding first non exception value
@@ -274,11 +290,11 @@ public class ALPCompression {
 
         // Replacing that first non exception value on the vector exceptions
         short exceptionsCount = 0;
-        for (long exceptionPos : exceptionsPositions) {
-            double actualValue = inputVector.get((int) exceptionPos);
-            state.encodedIntegers[(int) exceptionPos] = aNonExceptionValue;
+        for (short exceptionPos : exceptionsPositions) {
+            double actualValue = inputVector.get(exceptionPos);
+            state.encodedIntegers[exceptionPos] = aNonExceptionValue;
             state.exceptions[exceptionsCount] = actualValue;
-            state.exceptionsPositions[exceptionsCount] = (short) exceptionPos;
+            state.exceptionsPositions[exceptionsCount] = exceptionPos;
             exceptionsCount++;
         }
         state.exceptionsCount = exceptionsCount;
@@ -293,34 +309,101 @@ public class ALPCompression {
         }
         long minMaxDiff = maxValue - minValue;
 
-        // 意义不明
-//        auto *u_encoded_integers = reinterpret_cast<uint64_t *>(state.encoded_integers);
-//        auto const u_min_value = static_cast<uint64_t>(min_value);
-
         // Subtract FOR
-        if (!isEmpty) { //! We only execute the FOR if we are writing the data
-            for (int i = 0; i < nValues; i++) {
-                state.encodedIntegers[i] -= minValue;
-            }
+        for (int i = 0; i < nValues; i++) {
+            state.encodedIntegers[i] -= minValue;
         }
 
-//        int bitWidth = BitpackingPrimitives.minimumBitWidth(minMaxDiff);
-//        int bpSize = BitpackingPrimitives.getRequiredSize(nValues, bitWidth);
-//
-//        if (!isEmpty && bitWidth > 0) { //! We only execute the BP if we are writing the data
-//            long[] uEncodedIntegers = Arrays.stream(state.encodedIntegers).mapToLong(i -> i).toArray();
-//            BitpackingPrimitives.packBuffer(state.valuesEncoded, uEncodedIntegers, nValues, bitWidth);
-//        }
-//
-//        state.bitWidth = (short) bitWidth;
-//        state.bpSize = bpSize;
-//        state.frameOfReference = minValue;
+        int bitWidth = getWidthNeeded(minMaxDiff); // FFOR单值所需位宽
+
+        state.bitWidth = (short) bitWidth;
+        state.frameOfReference = minValue;
+
+        /*
+         TODO: bit pack
+            ALPCombination      最佳<e,f>组合       byte + byte
+            bitWidth            FOR单值所需位宽      short
+            frameOfReference    FOR基准值           long
+            nValues             向量长度            int
+            ForValues           FOR偏移值           bits<bitWidth>[nValues]
+            exceptionsCount     异常值数量           short
+            exceptions          异常值原值           double[exceptionsCount]
+            exceptionsPositions 异常值位置           short[exceptionsCount]
+         */
+        // 以下为模拟调用ALPDecompression,仅供测试使用
+        ALPDecompression ALPDe = new ALPDecompression(state.vectorExponent, state.vectorFactor, state.bitWidth, state.frameOfReference, nValues, state.encodedIntegers, state.exceptionsCount, state.exceptions, state.exceptionsPositions);
+        double[] out = ALPDe.decompress();
+
+        String csvFile = "D:\\Code\\ALP\\src\\main\\java\\out.csv"; // 输出文件名
+
+        try (FileWriter writer = new FileWriter(csvFile,true)) {
+            for (double value : out) {
+                writer.append(String.valueOf(value)).append("\n"); // 写入每个值并在行尾添加换行符
+            }
+            System.out.println("CSV file was written successfully.");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
+    /**
+     * ALP & ALPrd 算法压缩入口
+     * @param rowGroup  输入行组
+     */
+    public void entry(Vector<Vector<Double>> rowGroup){
+        Vector<Vector<Double>> vectorsSampled = new Vector<>();
+        int idxIncrements = Math.max(1, (int) Math.ceil((double) rowGroup.size() / ALPConstants.RG_SAMPLES)); // 用于行组采样的向量下标增量
+        for (int i = 0; i < rowGroup.size(); i += idxIncrements) {
+            vectorsSampled.add(rowGroup.get(i));
+        }
+        // 第一级采样
+        findTopKCombinations(vectorsSampled);
 
+        if (!state.useALP){
+            // use ALPrd
+            for (Vector<Double> row:rowGroup) {  // 逐行处理
+                ALPrd.entry(row);
+            }
+        }else {
+            // use ALP
+            for (Vector<Double> row:rowGroup){  // 逐行处理
+                // 第二级采样，获取最佳组合
+                findBestFactorAndExponent(row,ALPConstants.ALP_VECTOR_SIZE,state);
+                // 压缩处理
+                compress(row,ALPConstants.ALP_VECTOR_SIZE,state,false);
+            }
+        }
+    }
 
+    // 仅测试使用
+    public static Vector<Vector<Double>> readCSV(String filePath) throws IOException {
+        Vector<Vector<Double>> data = new Vector<>();
+        Vector<Double> currentVector = new Vector<>();
+        BufferedReader br = new BufferedReader(new FileReader(filePath));
+
+        String line;
+        while ((line = br.readLine()) != null) {
+            double value = Double.parseDouble(line.trim());
+            currentVector.add(value);
+
+            if (currentVector.size() == 1024) {
+                data.add(currentVector);
+                currentVector = new Vector<>();
+            }
+        }
+        br.close();
+
+        return data;
+    }
 
     public static void main(String[] args) {
-        System.out.println(MAGIC_NUMBER);
+        String filePath = "D:\\Code\\ALP\\src\\main\\java\\Air-pressure.csv";
+        try {
+            Vector<Vector<Double>> csvData = readCSV(filePath);
+            ALPCompression ALP = new ALPCompression();
+            ALP.entry(csvData);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 }

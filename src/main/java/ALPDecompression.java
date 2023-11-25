@@ -22,29 +22,61 @@ public class ALPDecompression {
             0.0000000000000000001,
             0.00000000000000000001
     };
-    public static void decompress(byte[] forEncoded, double[] output, int count, byte vectorFactor, byte vectorExponent,
-                                  short exceptionsCount, double[] exceptions, short[] exceptionsPositions,
-                                  long frameOfReference, short bitWidth) {
+    private long[] encodedValue;
+    private double[] output;
+    private int count;
+    private byte vectorFactor;
+    private byte vectorExponent;
+    private short exceptionsCount;
+    private double[] exceptions;
+    private short[] exceptionsPositions;
+    private long frameOfReference;
+    private short bitWidth;
+
+    public ALPDecompression(){}
+
+    public ALPDecompression(byte e, byte f, short bitWidth, long frameOfReference, int count, long[]encodedValue, short exceptionsCount, double[] exceptions, short[] exceptionsPositions){
+        // 仅供测试使用
+        this.vectorExponent = e;
+        this.vectorFactor = f;
+        this.bitWidth = bitWidth;
+        this.frameOfReference = frameOfReference;
+        this.count = count;
+        this.encodedValue = encodedValue;
+        this.exceptionsCount = exceptionsCount;
+        this.exceptions = exceptions;
+        this.exceptionsPositions = exceptionsPositions;
+    }
+
+    public void deserialize(){
+        /*
+        TODO: read
+            ALPCombination      最佳<e,f>组合       byte + byte                 -> vectorExponent, vectorFactor
+            bitWidth            FOR单值所需位宽      short                      -> bitWidth
+            frameOfReference    FOR基准值           long                       -> frameOfReference
+            nValues             向量长度            int                         -> count
+            ForValues           FOR偏移值           bits<bitWidth>[nValues]    -> encodedValue
+            exceptionsCount     异常值数量           short                      -> exceptionsCount
+            exceptions          异常值原值           double[exceptionsCount]    -> exceptions
+            exceptionsPositions 异常值位置           short[exceptionsCount]     -> exceptionsPositions
+         */
+    }
+    public double[] decompress() {
+
+        deserialize();
+        output = new double[count];
 
         long factor = ALPConstants.U_FACT_ARR[vectorFactor];
         double exponent = FRAC_ARR[vectorExponent];
 
-        // Bit Unpacking
-        byte[] forDecoded = new byte[ALPConstants.ALP_VECTOR_SIZE * 8];
-        if (bitWidth > 0) {
-            // TODO
-//            BitpackingPrimitives.unPackBuffer(forDecoded, forEncoded, count, bitWidth);
-        }
-        long[] encodedIntegers = new long[ALPConstants.ALP_VECTOR_SIZE * 8];
-
         // unFOR
         for (int i = 0; i < count; i++) {
-            encodedIntegers[i] = frameOfReference + forDecoded[i];
+            encodedValue[i] = frameOfReference + encodedValue[i];
         }
 
         // Decoding
         for (int i = 0; i < count; i++) {
-            double encodedInteger = encodedIntegers[i];
+            double encodedInteger = encodedValue[i];
             output[i] = (double)((long) (encodedInteger)) * factor * exponent;
         }
 
@@ -52,5 +84,7 @@ public class ALPDecompression {
         for (int i = 0; i < exceptionsCount; i++) {
             output[exceptionsPositions[i]] = exceptions[i];
         }
+
+        return output;
     }
 }

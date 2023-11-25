@@ -5,8 +5,6 @@ public class ALPrdCompressionState {
     public byte rightBw;
     public byte leftBw;
     public short exceptionsCount;
-    public byte[] rightPartsEncoded = new byte[ALPrdConstants.ALP_VECTOR_SIZE * 8];
-    public byte[] leftPartsEncoded = new byte[ALPrdConstants.ALP_VECTOR_SIZE * 8];
     public short[] leftPartsDict = new short[ALPrdConstants.DICTIONARY_SIZE];
     public short[] exceptions = new short[ALPrdConstants.ALP_VECTOR_SIZE];
     public short[] exceptionsPositions = new short[ALPrdConstants.ALP_VECTOR_SIZE];
