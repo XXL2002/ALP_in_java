@@ -107,7 +107,9 @@ public class ALPCompression {
                     long maxEncodedValue = Long.MIN_VALUE;
                     long minEncodedValue = Long.MAX_VALUE;
 
-                    for (Double db : sampledVector) {
+                    int idxIncrements = Math.max(1, (int) Math.ceil((double) sampledVector.size() / ALPConstants.SAMPLES_PER_VECTOR)); // 用于行组采样的向量下标增量
+                    for (int dbIndex=0; dbIndex<sampledVector.size(); dbIndex+=idxIncrements) {
+                        double db = sampledVector.get(dbIndex);
                         double tmp_encoded_value = db * EXP_ARR[expIdx] * FRAC_ARR[factorIdx];
                         long encoded_value = doubleToLong(tmp_encoded_value);    // 对应ALPenc
 
@@ -123,7 +125,7 @@ public class ALPCompression {
                     }
                     // Skip combinations which yields to almost all exceptions
                      // Also skip combinations which yields integers bigger than 2^48
-                    if (nonExceptionsCnt < sampledVector.size()*0.5 || maxEncodedValue >= 1L<<48) {
+                    if (nonExceptionsCnt < ALPConstants.SAMPLES_PER_VECTOR*0.5 || maxEncodedValue >= 1L<<48) {
                         continue;
                     }
                     // Evaluate factor/exponent compression size (we optimize for FOR)
@@ -398,7 +400,7 @@ public class ALPCompression {
     }
 
     public static void main(String[] args) {
-        String filePath = "D:\\Code\\ALP\\src\\main\\java\\Air-pressure.csv";
+        String filePath = "D:\\Code\\ALP\\src\\main\\java\\POI-lat.csv";
         try {
             Vector<Vector<Double>> csvData = readCSV(filePath);
             ALPCompression ALP = new ALPCompression();
