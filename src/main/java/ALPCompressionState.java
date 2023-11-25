@@ -7,7 +7,7 @@ public class ALPCompressionState {
     public short bitWidth;
     public long frameOfReference;
     public long[] encodedIntegers = new long[ALPConstants.ALP_VECTOR_SIZE];
-    public double[] exceptions =  new double[ALPConstants.ALP_VECTOR_SIZE]; // 泛型数组需要强制转换
+    public double[] exceptions =  new double[ALPConstants.ALP_VECTOR_SIZE];
     public short[] exceptionsPositions = new short[ALPConstants.ALP_VECTOR_SIZE];
     public Vector<ALPCombination> bestKCombinations = new Vector<>();
 

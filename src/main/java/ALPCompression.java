@@ -248,7 +248,7 @@ public class ALPCompression {
         state.vectorFactor = bestFactor;
     }
 
-    public static void compress(Vector<Double> inputVector, int nValues, ALPCompressionState state, boolean isEmpty) {
+    public static void compress(Vector<Double> inputVector, int nValues, ALPCompressionState state) {
         if (state.bestKCombinations.size() > 1) {
             findBestFactorAndExponent(inputVector, nValues, state);
         } else {
@@ -373,7 +373,7 @@ public class ALPCompression {
                 // 第二级采样，获取最佳组合
                 findBestFactorAndExponent(row,ALPConstants.ALP_VECTOR_SIZE,state);
                 // 压缩处理
-                compress(row,ALPConstants.ALP_VECTOR_SIZE,state,false);
+                compress(row,ALPConstants.ALP_VECTOR_SIZE,state);
             }
         }
     }
